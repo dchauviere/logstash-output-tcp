@@ -30,6 +30,14 @@ class LogStash::Outputs::Tcp < LogStash::Outputs::Base
   # `client` connects to a server.
   config :mode, :validate => ["server", "client"], :default => "client"
 
+  # if > 0, force reconnection to server (client mode only) after all
+  # n seconds if rebind_type = "time" or after n events if
+  # rebind_type = "count"
+  config :rebind_interval, :validate => :number, :default => 0
+
+  # Type of TCP rebind
+  config :rebind_type, :validate => ["time", "count"], :default => "time"
+
   class Client
     public
     def initialize(socket, logger)
@@ -86,6 +94,7 @@ class LogStash::Outputs::Tcp < LogStash::Outputs::Base
         @client_threads.reject! {|t| !t.alive? }
       end
     else
+      reset_rebind_counter
       client_socket = nil
       @codec.on_event do |event, payload|
         begin
@@ -98,17 +107,47 @@ class LogStash::Outputs::Tcp < LogStash::Outputs::Base
 
           # Now send the payload
           client_socket.syswrite(payload) if w.any?
+          if rebind?
+            @logger.warn("TCP output : rebind to server", :host => @host, :port => @port)
+            client_socket.close rescue nil
+            client_socket = nil
+            reset_rebind_counter
+          end
         rescue => e
           @logger.warn("tcp output exception", :host => @host, :port => @port,
                        :exception => e, :backtrace => e.backtrace)
           client_socket.close rescue nil
           client_socket = nil
           sleep @reconnect_interval
+          reset_rebind_counter
           retry
         end
       end
     end
   end # def register
+
+  private
+  def rebind?
+    if ( @rebind_interval > 0 )
+      if @rebind_type == "time"
+        Time.new - @rebind_counter > @rebind_interval
+      else
+        @rebind_counter = @rebind_counter + 1
+        @rebind_counter >= @rebind_interval
+      end
+    else
+      false
+    end
+  end
+
+  private
+  def reset_rebind_counter
+    if @rebind_type == "time"
+      @rebind_counter = Time.new
+    else
+      @rebind_counter = 0
+    end
+  end
 
   private
   def connect
