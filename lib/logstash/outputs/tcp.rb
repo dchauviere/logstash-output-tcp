@@ -116,7 +116,7 @@ class LogStash::Outputs::Tcp < LogStash::Outputs::Base
           # Now send the payload
           client_socket.syswrite(payload) if w.any?
           if rebind?
-            @logger.warn("TCP output : rebind to server", :host => @host, :port => @port)
+            @logger.debug("TCP output : rebind to server", :host => @host, :port => @port)
             client_socket.close rescue nil
             client_socket = nil
             reset_rebind_counter
